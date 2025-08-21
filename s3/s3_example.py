@@ -26,8 +26,18 @@ from s3_utils import get_public_url, upload_file, upload_many, upload_folder, ge
 
 
 # Upload entire folder "static/images" into bucket prefix "project_images/"
+
 # urls = upload_folder("static/images", s3_prefix="project_images", max_workers=10)
 # print("Uploaded folder URLs:", urls)
+
+
+base_folder = "D:/Download/Keyframes_L30_a" 
+for i in range(1, 97): # từ 45 đến 96 
+    subfolder = f"L30_V{i:03d}" # ví dụ: L30_V045, L30_V046, ... 
+    folder_path = f"{base_folder}/{subfolder}" 
+    s3_prefix = f"Keyframes_L30_a/{subfolder}" 
+    urls = upload_folder(folder_path, s3_prefix=s3_prefix, max_workers=32) 
+    print(f"Uploaded folder {folder_path} URLs:", urls)
 
 
 
