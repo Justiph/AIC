@@ -1,0 +1,6 @@
+flask
+boto3
+tqdm
+python-dotenv
+requests
+Pillow

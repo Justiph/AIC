@@ -115,3 +115,78 @@ def get_list(prefix=""):
 def get_presigned_url(object_name, expiry=3600):
     """Get a presigned URL for temporary access"""
     return s3.generate_presigned_url(object_name, expiry)
+
+def list_files(prefix=""):
+    """Liệt kê tất cả file dưới 1 prefix (folder) và trả về danh sách URL công khai."""
+    file_urls = []
+    paginator = s3.s3_client.get_paginator("list_objects_v2")
+    for page in paginator.paginate(Bucket=s3.bucket, Prefix=prefix):
+        for obj in page.get("Contents", []):
+            file_urls.append(get_public_url(obj["Key"]))
+    return file_urls
+
+
+def download_folder(prefix: str, local_dir: str, max_workers=64):
+    """
+    Download toàn bộ object trong folder (prefix) về local_dir với tốc độ cao,
+    thanh tiến trình và giữ nguyên cấu trúc thư mục con.
+    """
+    # Đảm bảo prefix luôn kết thúc bằng "/" để os.path.relpath hoạt động đúng
+    if not prefix.endswith('/'):
+        prefix += '/'
+
+    os.makedirs(local_dir, exist_ok=True)
+
+    # Step 1: Lấy danh sách file và tổng kích thước
+    paginator = s3.s3_client.get_paginator("list_objects_v2")
+    pages = paginator.paginate(Bucket=s3.bucket, Prefix=prefix)
+
+    files_to_download = []
+    total_size = 0
+    print("Đang lấy danh sách file và tính toán kích thước...")
+    for page in pages:
+        for obj in page.get("Contents", []):
+            key = obj["Key"]
+            size = obj.get("Size", 0)
+            if size > 0 and key.endswith(".webp"):
+                files_to_download.append({"key": key, "size": size})
+                total_size += size
+    
+    if not files_to_download:
+        print("⚠️ Không tìm thấy file .webp nào để tải trong prefix:", prefix)
+        return
+
+    print(f"📂 Tìm thấy {len(files_to_download)} files, tổng kích thước: {total_size / (1024*1024):.2f} MB")
+
+    # Step 2: Tải song song với thanh tiến trình toàn cục
+    with tqdm(total=total_size, unit="B", unit_scale=True, desc=f"Downloading {prefix}") as pbar:
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            futures = []
+            for file_info in files_to_download:
+                key = file_info["key"]
+                size = file_info["size"]
+                
+                # --- THAY ĐỔI CHÍNH Ở ĐÂY ---
+                # Tạo đường dẫn tương đối để giữ cấu trúc thư mục
+                relative_path = os.path.relpath(key, start=prefix)
+                local_path = os.path.join(local_dir, relative_path)
+                
+                # Đảm bảo thư mục con tồn tại trước khi tải
+                os.makedirs(os.path.dirname(local_path), exist_ok=True)
+                # ---------------------------
+
+                futures.append(
+                    executor.submit(
+                        s3.s3_client.download_file,
+                        s3.bucket,
+                        key,
+                        local_path,
+                        Callback=ProgressPercentage(key, size, pbar)
+                    )
+                )
+            
+            for future in as_completed(futures):
+                try:
+                    future.result()
+                except Exception as e:
+                    print(f"❌ Lỗi khi tải file: {e}")
